@@ -155,7 +155,16 @@ async def download_audio(url: str, bitrate: str = "192", progress_callback=None)
         "no_warnings": True,
     }
 
-    if bitrate != "original":
+    if bitrate == "m4a":
+        opts["format"] = "bestaudio[ext=m4a]/bestaudio/best"
+        opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "m4a",
+                "preferredquality": "0",
+            }
+        ]
+    elif bitrate != "original":
         opts["postprocessors"] = [
             {
                 "key": "FFmpegExtractAudio",

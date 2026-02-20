@@ -162,6 +162,7 @@ async def format_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("Оригинал ⚡", callback_data="audio:original"),
+                InlineKeyboardButton("M4A/AAC ⚡", callback_data="audio:m4a"),
             ],
             [
                 InlineKeyboardButton("MP3 96", callback_data="audio:96"),
@@ -174,8 +175,9 @@ async def format_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         ])
         await query.edit_message_text(
             "Выбери формат аудио:\n"
-            "Оригинал — webm/opus, без конвертации, быстрее всего\n"
-            "MP3 — конвертация, число = битрейт (kbps)",
+            "Оригинал — webm/opus, без конвертации\n"
+            "M4A/AAC — быстрая конвертация без потерь\n"
+            "MP3 — полная конвертация, число = битрейт (kbps)",
             reply_markup=keyboard,
         )
         return
@@ -550,8 +552,10 @@ async def audio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if bitrate == "original":
         await query.edit_message_text("Скачиваю аудио (оригинал)...")
+    elif bitrate == "m4a":
+        await query.edit_message_text("Скачиваю аудио (M4A/AAC)...")
     else:
-        await query.edit_message_text(f"Скачиваю аудио ({bitrate} kbps)...")
+        await query.edit_message_text(f"Скачиваю аудио (MP3 {bitrate} kbps)...")
     context.user_data["file_type"] = "audio"
 
     loop = asyncio.get_event_loop()

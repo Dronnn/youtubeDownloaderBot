@@ -1,6 +1,6 @@
 import logging
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
-from bot.config import BOT_TOKEN
+from bot.config import BOT_TOKEN, LOCAL_API_URL
 from bot.handlers import (
     start_command,
     help_command,
@@ -20,7 +20,18 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    application = Application.builder().token(BOT_TOKEN).build()
+    builder = Application.builder().token(BOT_TOKEN)
+
+    if LOCAL_API_URL:
+        builder = (
+            builder
+            .base_url(f"{LOCAL_API_URL}/bot")
+            .base_file_url(f"{LOCAL_API_URL}/file/bot")
+            .local_mode(True)
+        )
+        logger.info("Using Local Bot API Server at %s", LOCAL_API_URL)
+
+    application = builder.build()
 
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))

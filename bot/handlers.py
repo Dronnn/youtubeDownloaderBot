@@ -9,7 +9,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
-from bot.config import ALLOWED_USERS, DOWNLOAD_DIR, YANDEX_DISK_PATH, MAX_TELEGRAM_SIZE
+from bot.config import ALLOWED_USERS, DOWNLOAD_DIR, YANDEX_DISK_PATH, MAX_TELEGRAM_SIZE, LOCAL_API_URL
 from bot.downloader import (
     get_video_info,
     download_video,
@@ -25,9 +25,13 @@ YOUTUBE_URL_RE = re.compile(
     r'(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)[^\s]+'
 )
 
-# Telegram hard limit used as the send threshold
-_SEND_LIMIT = 50 * 1024 * 1024          # 50 MB
-_TARGET_BYTES = 49 * 1024 * 1024        # 49 MB compression target
+# Telegram send limits depend on whether we use the Local Bot API Server
+if LOCAL_API_URL:
+    _SEND_LIMIT = 2000 * 1024 * 1024    # 2 GB with local server
+    _TARGET_BYTES = 1999 * 1024 * 1024
+else:
+    _SEND_LIMIT = 50 * 1024 * 1024      # 50 MB with official API
+    _TARGET_BYTES = 49 * 1024 * 1024
 
 
 def _make_tg_progress(chat_id: int, message_id: int, bot, loop) -> callable:

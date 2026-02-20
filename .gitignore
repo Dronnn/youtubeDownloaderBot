@@ -26,8 +26,10 @@ downloads/
 *.part
 *.ytdl
 
-# Logs
+# Logs and internal docs
 *.log
+docs/
+logs/
 
 # OS files
 .DS_Store

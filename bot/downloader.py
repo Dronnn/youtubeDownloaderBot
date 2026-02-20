@@ -46,7 +46,7 @@ def _make_hooks(progress_callback):
             progress_callback(text)
 
         elif d["status"] == "finished":
-            progress_callback("Обработка файла...")
+            progress_callback("Скачано. Отправляю...")
 
     def pp_hook(d):
         pp = d.get("postprocessor", "")
@@ -54,7 +54,10 @@ def _make_hooks(progress_callback):
             if pp == "FFmpegMergerPP":
                 progress_callback("Объединяю видео и аудио...")
             elif pp == "FFmpegExtractAudio":
-                progress_callback("Извлекаю аудио...")
+                progress_callback("Конвертирую в MP3...")
+        elif d["status"] == "finished":
+            if pp == "MoveFiles":
+                progress_callback("Готово. Отправляю...")
 
     return progress_hook, pp_hook
 
@@ -135,21 +138,23 @@ async def download_video(url: str, height: int, progress_callback=None) -> tuple
 
 
 async def download_audio(url: str, bitrate: str = "192", progress_callback=None) -> tuple[str, str]:
-    """Download audio as MP3. Returns (file_path, title)."""
+    """Download audio as MP3 (or original format if bitrate='original')."""
     opts = {
         "format": "bestaudio/best",
         "outtmpl": DOWNLOAD_DIR + "/%(title)s.%(ext)s",
-        "postprocessors": [
+        "ffmpeg_location": FFMPEG_PATH,
+        "quiet": True,
+        "no_warnings": True,
+    }
+
+    if bitrate != "original":
+        opts["postprocessors"] = [
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
                 "preferredquality": bitrate,
             }
-        ],
-        "ffmpeg_location": FFMPEG_PATH,
-        "quiet": True,
-        "no_warnings": True,
-    }
+        ]
 
     if progress_callback:
         progress_hook, pp_hook = _make_hooks(progress_callback)

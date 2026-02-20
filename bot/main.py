@@ -1,4 +1,5 @@
 import logging
+from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.request import HTTPXRequest
 from bot.config import BOT_TOKEN, LOCAL_API_URL
@@ -45,6 +46,15 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(audio_callback, pattern="^audio:"))
     application.add_handler(CallbackQueryHandler(compress_callback, pattern="^compress:"))
     application.add_handler(CallbackQueryHandler(convert_callback, pattern="^convert:"))
+
+    async def post_init(app: Application) -> None:
+        await app.bot.set_my_commands([
+            BotCommand("start", "Запустить бота"),
+            BotCommand("help", "Справка"),
+            BotCommand("cancel", "Отменить текущую операцию"),
+        ])
+
+    application.post_init = post_init
 
     logger.info("Bot started")
     application.run_polling(drop_pending_updates=True)

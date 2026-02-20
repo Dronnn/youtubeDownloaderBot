@@ -233,6 +233,34 @@ def calculate_bitrate(
             return video_kbps, audio_kbps
 
 
+async def convert_to_mp3(file_path: str) -> str:
+    """Convert audio file to MP3 without re-encoding (max quality). Returns mp3 path."""
+    base = os.path.splitext(file_path)[0]
+    mp3_path = f"{base}.mp3"
+
+    cmd = [
+        FFMPEG_PATH, "-i", file_path,
+        "-q:a", "0",
+        "-y", mp3_path,
+    ]
+
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(
+            None,
+            partial(subprocess.run, cmd, capture_output=True, text=True, timeout=120),
+        )
+    except Exception as e:
+        if os.path.exists(mp3_path):
+            os.remove(mp3_path)
+        raise RuntimeError(f"ffmpeg convert failed: {e}") from e
+
+    if not os.path.exists(mp3_path) or os.path.getsize(mp3_path) == 0:
+        raise RuntimeError("ffmpeg produced no output file")
+
+    return mp3_path
+
+
 async def compress_file(
     file_path: str,
     video_bitrate_kbps: int,

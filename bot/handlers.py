@@ -15,6 +15,7 @@ from bot.downloader import (
     get_video_info,
     download_video,
     download_audio,
+    convert_to_mp3,
     compress_file,
     calculate_bitrate,
     _get_duration,
@@ -161,15 +162,18 @@ async def format_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 InlineKeyboardButton("Оригинал ⚡", callback_data="audio:original"),
             ],
             [
-                InlineKeyboardButton("96", callback_data="audio:96"),
-                InlineKeyboardButton("128", callback_data="audio:128"),
-                InlineKeyboardButton("192", callback_data="audio:192"),
-                InlineKeyboardButton("320", callback_data="audio:320"),
+                InlineKeyboardButton("MP3 96", callback_data="audio:96"),
+                InlineKeyboardButton("MP3 128", callback_data="audio:128"),
+            ],
+            [
+                InlineKeyboardButton("MP3 192", callback_data="audio:192"),
+                InlineKeyboardButton("MP3 320", callback_data="audio:320"),
             ]
         ])
         await query.edit_message_text(
-            "Выбери качество аудио:\n"
-            "Оригинал — без конвертации, самый быстрый",
+            "Выбери формат аудио:\n"
+            "Оригинал — webm/opus, без конвертации, быстрее всего\n"
+            "MP3 — конвертация, число = битрейт (kbps)",
             reply_markup=keyboard,
         )
         return
@@ -284,11 +288,31 @@ async def _send_file(
                         document=f,
                         filename=os.path.basename(file_path),
                     )
-            await _update_status("Отправлено.")
-        finally:
+        except Exception:
             if os.path.exists(file_path):
                 os.remove(file_path)
             context.user_data.pop("pending_file", None)
+            raise
+
+        # If we just sent a non-mp3 audio file, offer conversion
+        ext = os.path.splitext(file_path)[1].lower()
+        if context.user_data.get("file_type") == "audio" and ext != ".mp3":
+            context.user_data["convert_source"] = file_path
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("Да, в MP3", callback_data="convert:yes"),
+                    InlineKeyboardButton("Нет", callback_data="convert:no"),
+                ]
+            ])
+            await update.effective_chat.send_message(
+                "Сконвертировать в MP3 без потери качества?",
+                reply_markup=keyboard,
+            )
+        else:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            context.user_data.pop("pending_file", None)
+            await _update_status("Отправлено.")
         return
 
     # File is too large for Telegram — save original to Yandex.Disk
@@ -436,6 +460,65 @@ async def compress_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         f"Сжатый файл {result_mb:.1f} MB — всё ещё большой. Попробовать агрессивнее?",
         reply_markup=keyboard,
     )
+
+
+async def convert_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle convert:yes / convert:no after sending a non-mp3 audio file."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    if ALLOWED_USERS and user_id not in ALLOWED_USERS:
+        await query.edit_message_text("У вас нет доступа.")
+        return
+
+    choice = query.data  # "convert:yes" or "convert:no"
+    source = context.user_data.pop("convert_source", None)
+
+    if choice == "convert:no":
+        if source and os.path.exists(source):
+            os.remove(source)
+        context.user_data.pop("pending_file", None)
+        await query.edit_message_text("Ок, оставляем как есть.")
+        return
+
+    # convert:yes
+    if not source or not os.path.exists(source):
+        await query.edit_message_text("Файл не найден. Скачай заново.")
+        return
+
+    await query.edit_message_text("Конвертирую в MP3...")
+
+    try:
+        mp3_path = await convert_to_mp3(source)
+    except Exception as e:
+        logger.error("convert_to_mp3 failed: %s", e)
+        await query.edit_message_text(f"Ошибка конвертации: {e}")
+        return
+    finally:
+        if source and os.path.exists(source):
+            os.remove(source)
+        context.user_data.pop("pending_file", None)
+
+    mp3_mb = os.path.getsize(mp3_path) / (1024 * 1024)
+    await query.edit_message_text(f"Отправляю MP3 ({mp3_mb:.1f} MB)...")
+
+    try:
+        if LOCAL_API_URL:
+            await update.effective_chat.send_document(document=Path(mp3_path))
+        else:
+            with open(mp3_path, "rb") as f:
+                await update.effective_chat.send_document(
+                    document=f,
+                    filename=os.path.basename(mp3_path),
+                )
+        await query.edit_message_text("Отправлено.")
+    except Exception as e:
+        logger.error("send mp3 failed: %s", e)
+        await query.edit_message_text(f"Не удалось отправить: {e}")
+    finally:
+        if os.path.exists(mp3_path):
+            os.remove(mp3_path)
 
 
 async def audio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

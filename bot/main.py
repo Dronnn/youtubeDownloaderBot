@@ -9,6 +9,7 @@ from bot.handlers import (
     format_callback,
     resolution_callback,
     compress_callback,
+    convert_callback,
     audio_callback,
     cancel_command,
 )
@@ -43,6 +44,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(resolution_callback, pattern="^res:"))
     application.add_handler(CallbackQueryHandler(audio_callback, pattern="^audio:"))
     application.add_handler(CallbackQueryHandler(compress_callback, pattern="^compress:"))
+    application.add_handler(CallbackQueryHandler(convert_callback, pattern="^convert:"))
 
     logger.info("Bot started")
     application.run_polling(drop_pending_updates=True)

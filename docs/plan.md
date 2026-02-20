@@ -175,6 +175,37 @@ Document deployment process and best practices for managing bot instances.
 
 ---
 
+## Audio format choice + webm→MP3 conversion (2026-02-20)
+
+### Goal
+Дать пользователю полный выбор формата аудио. После отправки webm предложить
+конвертацию в MP3 без потери качества.
+
+### Steps
+- [x] Обновить кнопки аудио: Оригинал (webm/opus) / MP3 96 / MP3 128 / MP3 192 / MP3 320
+- [x] Добавить `convert_to_mp3()` в downloader.py (ffmpeg `-q:a 0`)
+- [x] Добавить `convert_callback` — после отправки webm спрашивает "Сконвертировать в MP3?"
+- [x] Зарегистрировать обработчик `convert:` в main.py
+- [x] git commit: "Add audio format choice and post-send MP3 conversion option"
+
+---
+
+## Telegram command menu (2026-02-20)
+
+- [x] Добавить `set_my_commands` в `post_init` — кнопка меню: /start, /help, /cancel
+- [x] git commit: "Add Telegram command menu (start, help, cancel)"
+
+---
+
+## Local API: file path instead of streaming (2026-02-20)
+
+- [x] `send_document(document=Path(file_path))` в local mode — сервер читает с диска, без таймаутов
+- [x] Увеличены HTTP таймауты до 300 сек как fallback
+- [x] Обновлена справка: лимит 2 GB, актуальные форматы
+- [x] git commits: "Use local file paths for send_document", "Increase HTTP timeouts", "Update help text"
+
+---
+
 ## Testing and validation (2026-02-20)
 
 - [ ] End-to-end test: download video at multiple resolutions, verify quality

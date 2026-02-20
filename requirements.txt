@@ -1,3 +1,9 @@
-python-telegram-bot[ext]~=21.0
-yt-dlp
-python-dotenv
+# Telegram bot framework (async, includes job-queue, webhooks, rate-limiter, callback-data)
+python-telegram-bot[ext]~=22.0
+
+# YouTube / audio downloader — releases frequently, keep unpinned for extractor updates
+# NOTE: ffmpeg must be installed as a system dependency (not via pip) for video+audio merging
+yt-dlp>=2026.02.04
+
+# .env file loader
+python-dotenv>=1.0

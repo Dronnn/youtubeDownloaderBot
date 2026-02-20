@@ -8,11 +8,25 @@
 - [x] Brainstorming и дизайн — требования, UX flow, архитектура
 - [x] Написать дизайн-документ (`docs/plans/2026-02-20-youtube-downloader-bot-design.md`)
 - [x] Инициализация проекта — git init, .gitignore, README.md, структура папок
-- [ ] Создать GitHub репо, init commit
-- [ ] Реализовать `bot/config.py` — загрузка .env конфигурации
-- [ ] Реализовать `bot/downloader.py` — скачивание через yt-dlp
-- [ ] Реализовать `bot/handlers.py` — обработчики команд и callback'ов
-- [ ] Реализовать `bot/main.py` — точка входа
-- [ ] Создать `.env.example` и `requirements.txt`
+- [x] Создать GitHub репо, init commit
+- [x] Реализовать `bot/config.py` — загрузка .env конфигурации
+- [x] Реализовать `bot/downloader.py` — скачивание через yt-dlp
+- [x] Реализовать `bot/handlers.py` — обработчики команд и callback'ов
+- [x] Реализовать `bot/main.py` — точка входа
+- [x] Создать `.env.example` и `requirements.txt`
 - [ ] Тестирование — проверить полный flow локально
 - [ ] Деплой на старый Mac
+
+---
+
+## Code Review & Bugfix (2026-02-20)
+
+- [x] VERSION MISMATCH: проверить совместимость кода с python-telegram-bot v22 — OK, совместим
+- [x] SECURITY: добавить whitelist-проверку в format_callback и resolution_callback
+- [x] SECURITY: поправить .env.example — убрать реальные ID
+- [x] YT-DLP: перейти на `requested_downloads` для получения filepath
+- [x] YT-DLP: перейти на format-строки вместо format_id для видео
+- [x] HANDLERS: исправить вызовы download_video/download_audio (сигнатуры не совпадали)
+- [x] HANDLERS: исправить format_callback (обрабатывал результат get_video_info неправильно)
+- [x] CODE QUALITY: общая чистка, проверка error handling, cleanup
+- [x] AI ATTRIBUTION: проверено — упоминаний нет

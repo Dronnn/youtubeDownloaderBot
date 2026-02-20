@@ -1,10 +1,14 @@
+import asyncio
 import glob
+import logging
 import os
 import re
 import shutil
-import logging
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
+
 from bot.config import ALLOWED_USERS, DOWNLOAD_DIR, YANDEX_DISK_PATH, MAX_TELEGRAM_SIZE
 from bot.downloader import (
     get_video_info,
@@ -24,6 +28,34 @@ YOUTUBE_URL_RE = re.compile(
 # Telegram hard limit used as the send threshold
 _SEND_LIMIT = 50 * 1024 * 1024          # 50 MB
 _TARGET_BYTES = 49 * 1024 * 1024        # 49 MB compression target
+
+
+def _make_tg_progress(chat_id: int, message_id: int, bot, loop) -> callable:
+    """Return a sync callback that schedules Telegram message edits on the event loop.
+
+    The callback is called from a background thread (run_in_executor) so we use
+    asyncio.run_coroutine_threadsafe to bridge into the async world.
+    """
+    last_text = {"v": ""}
+
+    def callback(text: str) -> None:
+        if text == last_text["v"]:
+            return
+        last_text["v"] = text
+        future = asyncio.run_coroutine_threadsafe(
+            bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text),
+            loop,
+        )
+        try:
+            future.result(timeout=10)
+        except BadRequest:
+            # "Message is not modified" — same text sent twice, harmless
+            pass
+        except Exception:
+            # Network hiccup or rate-limit; skip this update, next one will come
+            pass
+
+    return callback
 
 
 def _yandex_dest(file_path: str, file_type: str) -> str:
@@ -190,8 +222,16 @@ async def resolution_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.edit_message_text("Скачиваю видео...")
     context.user_data["file_type"] = "video"
 
+    loop = asyncio.get_event_loop()
+    progress_cb = _make_tg_progress(
+        chat_id=update.effective_chat.id,
+        message_id=query.message.message_id,
+        bot=context.bot,
+        loop=loop,
+    )
+
     try:
-        file_path, title = await download_video(url, height)
+        file_path, title = await download_video(url, height, progress_callback=progress_cb)
     except Exception as e:
         logger.error("download_video failed for %s (height %d): %s", url, height, e)
         await query.edit_message_text(f"Не удалось скачать: {e}")
@@ -206,13 +246,9 @@ async def resolution_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def _send_file(update: Update, context: ContextTypes.DEFAULT_TYPE, file_path: str) -> None:
-    """Send the file via Telegram if ≤ 50 MB.
-
-    If the file is larger:
-      1. Save original to Yandex.Disk immediately.
-      2. Ask user whether to compress and send to Telegram.
-    """
+    """Send file to Telegram if ≤ 50 MB, otherwise save to Yandex.Disk and offer compression."""
     size = os.path.getsize(file_path)
+    size_mb = size / (1024 * 1024)
 
     if size <= _SEND_LIMIT:
         try:
@@ -227,18 +263,16 @@ async def _send_file(update: Update, context: ContextTypes.DEFAULT_TYPE, file_pa
             context.user_data.pop("pending_file", None)
         return
 
-    # File is too large — save to Yandex.Disk first
-    size_mb = size / (1024 * 1024)
+    # File is too large for Telegram — save original to Yandex.Disk
     file_type = context.user_data.get("file_type", "video")
     dest_path = _yandex_dest(file_path, file_type)
-
     try:
         shutil.copy2(file_path, dest_path)
-        logger.info("Saved original to Yandex.Disk: %s", dest_path)
+        logger.info("Saved to Yandex.Disk: %s", dest_path)
     except Exception as e:
         logger.error("Failed to copy to Yandex.Disk: %s", e)
         await update.effective_chat.send_message(
-            f"Файл {size_mb:.1f} MB — не удалось сохранить на Яндекс.Диск: {e}"
+            f"Не удалось сохранить на Яндекс.Диск: {e}"
         )
         return
 
@@ -392,8 +426,16 @@ async def audio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await query.edit_message_text(f"Скачиваю аудио ({bitrate} kbps)...")
     context.user_data["file_type"] = "audio"
 
+    loop = asyncio.get_event_loop()
+    progress_cb = _make_tg_progress(
+        chat_id=update.effective_chat.id,
+        message_id=query.message.message_id,
+        bot=context.bot,
+        loop=loop,
+    )
+
     try:
-        file_path, title = await download_audio(url, bitrate)
+        file_path, title = await download_audio(url, bitrate, progress_callback=progress_cb)
     except Exception as e:
         logger.error("download_audio failed for %s: %s", url, e)
         await query.edit_message_text(f"Не удалось скачать: {e}")

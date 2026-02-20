@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import subprocess
+import time
 from functools import partial
 
 import yt_dlp
@@ -11,6 +12,51 @@ from bot.config import DOWNLOAD_DIR, FFMPEG_PATH, MAX_TELEGRAM_SIZE
 logger = logging.getLogger(__name__)
 
 COMMON_RESOLUTIONS = {"360p", "480p", "720p", "1080p"}
+
+_UPDATE_INTERVAL = 4.0  # seconds between progress updates to Telegram
+
+
+def _make_hooks(progress_callback):
+    """Create yt-dlp progress_hook and postprocessor_hook that call progress_callback(text)."""
+    last_update = {"t": 0.0}
+
+    def progress_hook(d):
+        if d["status"] == "downloading":
+            now = time.time()
+            if now - last_update["t"] < _UPDATE_INTERVAL:
+                return
+            last_update["t"] = now
+
+            downloaded = d.get("downloaded_bytes", 0)
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            speed = d.get("speed")
+
+            if total and total > 0:
+                pct = downloaded / total * 100
+                dl_mb = downloaded / 1024 / 1024
+                total_mb = total / 1024 / 1024
+                text = f"Скачиваю... {pct:.0f}% ({dl_mb:.1f} / {total_mb:.1f} MB)"
+            else:
+                dl_mb = downloaded / 1024 / 1024
+                text = f"Скачиваю... {dl_mb:.1f} MB"
+
+            if speed:
+                text += f" | {speed / 1024 / 1024:.1f} MB/s"
+
+            progress_callback(text)
+
+        elif d["status"] == "finished":
+            progress_callback("Обработка файла...")
+
+    def pp_hook(d):
+        pp = d.get("postprocessor", "")
+        if d["status"] == "started":
+            if pp == "FFmpegMergerPP":
+                progress_callback("Объединяю видео и аудио...")
+            elif pp == "FFmpegExtractAudio":
+                progress_callback("Извлекаю аудио...")
+
+    return progress_hook, pp_hook
 
 _FFPROBE_PATH = FFMPEG_PATH.replace("ffmpeg", "ffprobe") if "ffmpeg" in FFMPEG_PATH else "ffprobe"
 
@@ -61,7 +107,7 @@ async def get_video_info(url: str) -> dict:
     }
 
 
-async def download_video(url: str, height: int) -> tuple[str, str]:
+async def download_video(url: str, height: int, progress_callback=None) -> tuple[str, str]:
     """Download video at the given resolution. Returns (file_path, title)."""
     opts = {
         "format": f"bestvideo[height<={height}]+bestaudio/best[height<={height}]",
@@ -72,9 +118,15 @@ async def download_video(url: str, height: int) -> tuple[str, str]:
         "no_warnings": True,
     }
 
+    if progress_callback:
+        progress_hook, pp_hook = _make_hooks(progress_callback)
+        opts["progress_hooks"] = [progress_hook]
+
     loop = asyncio.get_event_loop()
 
     with yt_dlp.YoutubeDL(opts) as ydl:
+        if progress_callback:
+            ydl.add_postprocessor_hook(pp_hook)
         info = await loop.run_in_executor(None, partial(ydl.extract_info, url))
 
     title = info.get("title", "video")
@@ -82,7 +134,7 @@ async def download_video(url: str, height: int) -> tuple[str, str]:
     return file_path, title
 
 
-async def download_audio(url: str, bitrate: str = "192") -> tuple[str, str]:
+async def download_audio(url: str, bitrate: str = "192", progress_callback=None) -> tuple[str, str]:
     """Download audio as MP3. Returns (file_path, title)."""
     opts = {
         "format": "bestaudio/best",
@@ -99,9 +151,15 @@ async def download_audio(url: str, bitrate: str = "192") -> tuple[str, str]:
         "no_warnings": True,
     }
 
+    if progress_callback:
+        progress_hook, pp_hook = _make_hooks(progress_callback)
+        opts["progress_hooks"] = [progress_hook]
+
     loop = asyncio.get_event_loop()
 
     with yt_dlp.YoutubeDL(opts) as ydl:
+        if progress_callback:
+            ydl.add_postprocessor_hook(pp_hook)
         info = await loop.run_in_executor(None, partial(ydl.extract_info, url))
 
     title = info.get("title", "audio")

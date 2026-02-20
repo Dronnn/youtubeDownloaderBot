@@ -141,49 +141,100 @@ async def resolution_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text(f"Не удалось скачать: {e}")
         return
 
+    context.user_data["pending_file"] = file_path
     try:
-        await _send_file(update, file_path)
+        await _send_file(update, context, file_path)
     except Exception as e:
         logger.error("_send_file failed for %s: %s", file_path, e)
         await query.edit_message_text(f"Не удалось отправить файл: {e}")
 
 
-async def _send_file(update: Update, file_path: str) -> None:
-    """Send the file via Telegram. Compress if too large, fallback to Yandex.Disk."""
+async def _send_file(update: Update, context: ContextTypes.DEFAULT_TYPE, file_path: str) -> None:
+    """Send the file via Telegram if small enough, otherwise ask user what to do."""
+    size = os.path.getsize(file_path)
+
+    if size <= MAX_TELEGRAM_SIZE:
+        try:
+            with open(file_path, "rb") as f:
+                await update.effective_chat.send_document(
+                    document=f,
+                    filename=os.path.basename(file_path),
+                )
+        finally:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            context.user_data.pop("pending_file", None)
+        return
+
+    # File too large — ask user
+    size_mb = size / (1024 * 1024)
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Сжать и отправить", callback_data="toobig:compress"),
+            InlineKeyboardButton("Сохранить в Яндекс.Диск", callback_data="toobig:yandex"),
+        ]
+    ])
+    await update.effective_chat.send_message(
+        f"Файл {size_mb:.1f} MB — слишком большой для Telegram (лимит {MAX_TELEGRAM_SIZE // 1024 // 1024} MB).\n"
+        "Что сделать?",
+        reply_markup=keyboard,
+    )
+
+
+async def toobig_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle user choice for oversized files."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    if ALLOWED_USERS and user_id not in ALLOWED_USERS:
+        await query.edit_message_text("У вас нет доступа.")
+        return
+
+    file_path = context.user_data.get("pending_file")
+    if not file_path or not os.path.exists(file_path):
+        await query.edit_message_text("Файл не найден. Попробуй скачать заново.")
+        return
+
+    choice = query.data  # "toobig:compress" or "toobig:yandex"
+
+    if choice == "toobig:yandex":
+        os.makedirs(YANDEX_DISK_PATH, exist_ok=True)
+        dest_path = os.path.join(YANDEX_DISK_PATH, os.path.basename(file_path))
+        shutil.copy2(file_path, dest_path)
+        os.remove(file_path)
+        context.user_data.pop("pending_file", None)
+        await query.edit_message_text(f"Сохранён в Яндекс.Диск:\n{dest_path}")
+        return
+
+    # toobig:compress
+    await query.edit_message_text("Сжимаю...")
     compressed_path = None
     try:
-        size = os.path.getsize(file_path)
-
-        if size > MAX_TELEGRAM_SIZE:
-            await update.effective_chat.send_message(
-                f"Файл {size / 1024 / 1024:.1f} MB — сжимаю..."
-            )
-            try:
-                compressed_path = await compress_to_fit(file_path)
-            except Exception as e:
-                logger.warning("Compression failed: %s, falling back to Yandex.Disk", e)
-                os.makedirs(YANDEX_DISK_PATH, exist_ok=True)
-                dest_path = os.path.join(YANDEX_DISK_PATH, os.path.basename(file_path))
-                shutil.copy2(file_path, dest_path)
-                await update.effective_chat.send_message(
-                    f"Не удалось сжать. Сохранён в Яндекс.Диск:\n{dest_path}"
-                )
-                return
-
-            send_path = compressed_path
-        else:
-            send_path = file_path
-
-        with open(send_path, "rb") as f:
+        compressed_path = await compress_to_fit(file_path)
+        with open(compressed_path, "rb") as f:
             await update.effective_chat.send_document(
                 document=f,
                 filename=os.path.basename(file_path),
             )
+        await query.edit_message_text("Сжато и отправлено.")
+    except Exception as e:
+        logger.error("Compression/send failed: %s", e)
+        # Fallback to Yandex.Disk
+        os.makedirs(YANDEX_DISK_PATH, exist_ok=True)
+        dest_path = os.path.join(YANDEX_DISK_PATH, os.path.basename(file_path))
+        if os.path.exists(file_path):
+            shutil.copy2(file_path, dest_path)
+        await query.edit_message_text(
+            f"Не удалось сжать. Сохранён в Яндекс.Диск:\n{dest_path}"
+        )
     finally:
         if os.path.exists(file_path):
             os.remove(file_path)
         if compressed_path and compressed_path != file_path and os.path.exists(compressed_path):
             os.remove(compressed_path)
+        context.user_data.pop("pending_file", None)
 
 
 async def _download_and_send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -203,8 +254,9 @@ async def _download_and_send_audio(update: Update, context: ContextTypes.DEFAULT
         await query.edit_message_text(f"Не удалось скачать: {e}")
         return
 
+    context.user_data["pending_file"] = file_path
     try:
-        await _send_file(update, file_path)
+        await _send_file(update, context, file_path)
     except Exception as e:
         logger.error("_send_file failed for %s: %s", file_path, e)
         await query.edit_message_text(f"Не удалось отправить файл: {e}")

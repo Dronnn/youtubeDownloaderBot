@@ -1,5 +1,6 @@
 import logging
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram.request import HTTPXRequest
 from bot.config import BOT_TOKEN, LOCAL_API_URL
 from bot.handlers import (
     start_command,
@@ -28,6 +29,7 @@ def main() -> None:
             .base_url(f"{LOCAL_API_URL}/bot")
             .base_file_url(f"{LOCAL_API_URL}/file/bot")
             .local_mode(True)
+            .request(HTTPXRequest(read_timeout=300, write_timeout=300, connect_timeout=30))
         )
         logger.info("Using Local Bot API Server at %s", LOCAL_API_URL)
 

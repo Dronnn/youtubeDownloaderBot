@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import shutil
+from pathlib import Path
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
@@ -275,11 +276,14 @@ async def _send_file(
     if size <= _SEND_LIMIT:
         await _update_status(f"Отправляю в Telegram ({size_mb:.1f} MB)...")
         try:
-            with open(file_path, "rb") as f:
-                await update.effective_chat.send_document(
-                    document=f,
-                    filename=os.path.basename(file_path),
-                )
+            if LOCAL_API_URL:
+                await update.effective_chat.send_document(document=Path(file_path))
+            else:
+                with open(file_path, "rb") as f:
+                    await update.effective_chat.send_document(
+                        document=f,
+                        filename=os.path.basename(file_path),
+                    )
             await _update_status("Отправлено.")
         finally:
             if os.path.exists(file_path):
@@ -393,10 +397,13 @@ async def compress_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if result_size <= _TARGET_BYTES:
         # Success — send to Telegram
         try:
-            with open(compressed_path, "rb") as f:
-                await update.effective_chat.send_document(
-                    document=f,
-                    filename=os.path.basename(file_path),
+            if LOCAL_API_URL:
+                await update.effective_chat.send_document(document=Path(compressed_path))
+            else:
+                with open(compressed_path, "rb") as f:
+                    await update.effective_chat.send_document(
+                        document=f,
+                        filename=os.path.basename(file_path),
                 )
             await query.edit_message_text("Сжато и отправлено в Telegram.")
         except Exception as e:

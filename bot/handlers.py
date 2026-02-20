@@ -491,8 +491,16 @@ async def convert_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     await query.edit_message_text("Конвертирую в MP3...")
 
+    loop = asyncio.get_event_loop()
+    progress_cb = _make_tg_progress(
+        chat_id=update.effective_chat.id,
+        message_id=query.message.message_id,
+        bot=context.bot,
+        loop=loop,
+    )
+
     try:
-        mp3_path = await convert_to_mp3(source)
+        mp3_path = await convert_to_mp3(source, progress_callback=progress_cb)
     except Exception as e:
         logger.error("convert_to_mp3 failed: %s", e)
         await query.edit_message_text(f"Ошибка конвертации: {e}")

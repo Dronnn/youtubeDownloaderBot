@@ -233,8 +233,8 @@ def calculate_bitrate(
             return video_kbps, audio_kbps
 
 
-async def convert_to_mp3(file_path: str) -> str:
-    """Convert audio file to MP3 without re-encoding (max quality). Returns mp3 path."""
+async def convert_to_mp3(file_path: str, progress_callback=None) -> str:
+    """Convert audio file to MP3 (max VBR quality). Returns mp3 path."""
     base = os.path.splitext(file_path)[0]
     mp3_path = f"{base}.mp3"
 
@@ -245,11 +245,27 @@ async def convert_to_mp3(file_path: str) -> str:
     ]
 
     loop = asyncio.get_event_loop()
-    try:
-        await loop.run_in_executor(
-            None,
-            partial(subprocess.run, cmd, capture_output=True, text=True, timeout=120),
+
+    async def _run_with_progress():
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
         )
+        elapsed = 0
+        while True:
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=10)
+                break
+            except asyncio.TimeoutError:
+                elapsed += 10
+                if progress_callback:
+                    progress_callback(f"Конвертирую в MP3... {elapsed} сек")
+
+        if proc.returncode != 0:
+            stderr = (await proc.stderr.read()).decode(errors="replace")
+            raise RuntimeError(f"ffmpeg exit code {proc.returncode}: {stderr[:200]}")
+
+    try:
+        await _run_with_progress()
     except Exception as e:
         if os.path.exists(mp3_path):
             os.remove(mp3_path)

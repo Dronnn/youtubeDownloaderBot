@@ -87,9 +87,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Отправь ссылку на YouTube — я предложу скачать видео или только аудио.\n\n"
-        "Если файл > 50 MB — оригинал сохраняется на Яндекс.Диск, "
-        "потом предлагается сжать и отправить в Telegram.\n\n"
+        "Отправь ссылку на YouTube — я предложу скачать видео или аудио.\n\n"
+        "Видео — выбираешь разрешение (360p–1080p)\n"
+        "Аудио — оригинал (webm) или MP3 (96–320 kbps)\n\n"
+        "Файлы до 2 GB отправляются в Telegram.\n"
+        "Если больше — сохраняется на Яндекс.Диск, предлагается сжатие.\n\n"
         "/cancel — отменить операцию и удалить временные файлы."
     )
 

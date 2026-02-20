@@ -250,24 +250,37 @@ async def resolution_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     context.user_data["pending_file"] = file_path
     try:
-        await _send_file(update, context, file_path)
+        await _send_file(update, context, file_path, status_message_id=query.message.message_id)
     except Exception as e:
         logger.error("_send_file failed for %s: %s", file_path, e)
         await query.edit_message_text(f"Не удалось отправить файл: {e}")
 
 
-async def _send_file(update: Update, context: ContextTypes.DEFAULT_TYPE, file_path: str) -> None:
-    """Send file to Telegram if ≤ 50 MB, otherwise save to Yandex.Disk and offer compression."""
+async def _send_file(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, file_path: str, status_message_id: int = 0,
+) -> None:
+    """Send file to Telegram if ≤ send limit, otherwise save to Yandex.Disk and offer compression."""
+    chat_id = update.effective_chat.id
     size = os.path.getsize(file_path)
     size_mb = size / (1024 * 1024)
 
+    async def _update_status(text: str) -> None:
+        if not status_message_id:
+            return
+        try:
+            await context.bot.edit_message_text(chat_id=chat_id, message_id=status_message_id, text=text)
+        except Exception:
+            pass
+
     if size <= _SEND_LIMIT:
+        await _update_status(f"Отправляю в Telegram ({size_mb:.1f} MB)...")
         try:
             with open(file_path, "rb") as f:
                 await update.effective_chat.send_document(
                     document=f,
                     filename=os.path.basename(file_path),
                 )
+            await _update_status("Отправлено.")
         finally:
             if os.path.exists(file_path):
                 os.remove(file_path)
@@ -275,6 +288,7 @@ async def _send_file(update: Update, context: ContextTypes.DEFAULT_TYPE, file_pa
         return
 
     # File is too large for Telegram — save original to Yandex.Disk
+    await _update_status(f"Файл {size_mb:.1f} MB — сохраняю на Яндекс.Диск...")
     file_type = context.user_data.get("file_type", "video")
     dest_path = _yandex_dest(file_path, file_type)
     try:
@@ -457,7 +471,7 @@ async def audio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     context.user_data["pending_file"] = file_path
     try:
-        await _send_file(update, context, file_path)
+        await _send_file(update, context, file_path, status_message_id=query.message.message_id)
     except Exception as e:
         logger.error("_send_file failed for %s: %s", file_path, e)
         await query.edit_message_text(f"Не удалось отправить файл: {e}")

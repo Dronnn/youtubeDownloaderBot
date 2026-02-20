@@ -19,6 +19,7 @@ _UPDATE_INTERVAL = 4.0  # seconds between progress updates to Telegram
 def _make_hooks(progress_callback):
     """Create yt-dlp progress_hook and postprocessor_hook that call progress_callback(text)."""
     last_update = {"t": 0.0}
+    stream_count = {"n": 0}
 
     def progress_hook(d):
         if d["status"] == "downloading":
@@ -31,14 +32,18 @@ def _make_hooks(progress_callback):
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             speed = d.get("speed")
 
+            prefix = "Скачиваю"
+            if stream_count["n"] == 1:
+                prefix = "Скачиваю аудиодорожку"
+
             if total and total > 0:
                 pct = downloaded / total * 100
                 dl_mb = downloaded / 1024 / 1024
                 total_mb = total / 1024 / 1024
-                text = f"Скачиваю... {pct:.0f}% ({dl_mb:.1f} / {total_mb:.1f} MB)"
+                text = f"{prefix}... {pct:.0f}% ({dl_mb:.1f} / {total_mb:.1f} MB)"
             else:
                 dl_mb = downloaded / 1024 / 1024
-                text = f"Скачиваю... {dl_mb:.1f} MB"
+                text = f"{prefix}... {dl_mb:.1f} MB"
 
             if speed:
                 text += f" | {speed / 1024 / 1024:.1f} MB/s"
@@ -46,7 +51,11 @@ def _make_hooks(progress_callback):
             progress_callback(text)
 
         elif d["status"] == "finished":
-            progress_callback("Скачано. Отправляю...")
+            stream_count["n"] += 1
+            if stream_count["n"] == 1:
+                progress_callback("Видеодорожка скачана. Скачиваю аудио...")
+            else:
+                progress_callback("Скачано. Обрабатываю...")
 
     def pp_hook(d):
         pp = d.get("postprocessor", "")
@@ -55,9 +64,8 @@ def _make_hooks(progress_callback):
                 progress_callback("Объединяю видео и аудио...")
             elif pp == "FFmpegExtractAudio":
                 progress_callback("Конвертирую в MP3...")
-        elif d["status"] == "finished":
-            if pp == "MoveFiles":
-                progress_callback("Готово. Отправляю...")
+            elif pp == "MoveFiles":
+                progress_callback("Отправляю в Telegram...")
 
     return progress_hook, pp_hook
 

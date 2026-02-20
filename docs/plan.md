@@ -14,7 +14,8 @@
 - [x] Реализовать `bot/handlers.py` — обработчики команд и callback'ов
 - [x] Реализовать `bot/main.py` — точка входа
 - [x] Создать `.env.example` и `requirements.txt`
-- [ ] Тестирование — проверить полный flow локально
+- [x] Code review и исправление ошибок
+- [ ] Тестирование — проверить полный flow на старом Mac
 - [ ] Деплой на старый Mac
 
 ---
@@ -23,10 +24,10 @@
 
 - [x] VERSION MISMATCH: проверить совместимость кода с python-telegram-bot v22 — OK, совместим
 - [x] SECURITY: добавить whitelist-проверку в format_callback и resolution_callback
-- [x] SECURITY: поправить .env.example — убрать реальные ID
+- [x] SECURITY: поправить .env.example — убрать реальные данные, только плейсхолдеры
 - [x] YT-DLP: перейти на `requested_downloads` для получения filepath
 - [x] YT-DLP: перейти на format-строки вместо format_id для видео
 - [x] HANDLERS: исправить вызовы download_video/download_audio (сигнатуры не совпадали)
 - [x] HANDLERS: исправить format_callback (обрабатывал результат get_video_info неправильно)
-- [x] CODE QUALITY: общая чистка, проверка error handling, cleanup
-- [x] AI ATTRIBUTION: проверено — упоминаний нет
+- [x] CODE QUALITY: общая чистка, проверка error handling, cleanup временных файлов
+- [x] COMPATIBILITY: проверена совместимость с macOS Big Sur (Python 3.11, yt-dlp, python-telegram-bot v22)

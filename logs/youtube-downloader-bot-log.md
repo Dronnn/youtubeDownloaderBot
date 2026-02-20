@@ -51,4 +51,22 @@
 ## Step 9: Обновление документации
 - README.md обновлён
 - requirements.txt проверен
-- Security audit проведён
+
+## Step 10: Code review и исправления (2026-02-20)
+- Прошёлся по всему коду, нашёл и исправил ряд проблем:
+- SECURITY: в format_callback и resolution_callback не было проверки whitelist — добавлено
+- SECURITY: в .env.example были реальные данные — заменены на плейсхолдеры
+- YT-DLP: filepath брался через `info["filepath"]` — заменено на `info["requested_downloads"][0]["filepath"]` (правильный способ)
+- YT-DLP: формат видео задавался через format_id — переделано на format-строку `bestvideo[height<=N]+bestaudio/best[height<=N]`
+- HANDLERS: сигнатуры download_video/download_audio не совпадали с тем, что передавалось из handlers — исправлено
+- HANDLERS: format_callback неправильно разбирал результат get_video_info — переделан
+- CODE QUALITY: добавлен cleanup временных файлов в блок finally, улучшена обработка ошибок
+
+## Step 11: Проверка совместимости с macOS Big Sur (2026-02-20)
+- Целевая машина для деплоя работает на macOS Big Sur
+- Python 3.11 доступен через Homebrew, совместим
+- python-telegram-bot v22 требует Python 3.8+ — OK
+- yt-dlp совместим с Big Sur без ограничений
+- ffmpeg доступен через Homebrew, работает на Big Sur
+- asyncio и run_in_executor — стандартные, без платформ-специфичных зависимостей
+- Итог: несовместимостей не выявлено, деплой возможен

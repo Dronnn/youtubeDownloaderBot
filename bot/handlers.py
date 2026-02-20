@@ -1,17 +1,37 @@
+import glob
 import os
 import re
 import shutil
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from bot.config import ALLOWED_USERS, YANDEX_DISK_PATH, MAX_TELEGRAM_SIZE
-from bot.downloader import get_video_info, download_video, download_audio, compress_to_fit
+from bot.config import ALLOWED_USERS, DOWNLOAD_DIR, YANDEX_DISK_PATH, MAX_TELEGRAM_SIZE
+from bot.downloader import (
+    get_video_info,
+    download_video,
+    download_audio,
+    compress_file,
+    calculate_bitrate,
+    _get_duration,
+)
 
 logger = logging.getLogger(__name__)
 
 YOUTUBE_URL_RE = re.compile(
     r'(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)[^\s]+'
 )
+
+# Telegram hard limit used as the send threshold
+_SEND_LIMIT = 50 * 1024 * 1024          # 50 MB
+_TARGET_BYTES = 49 * 1024 * 1024        # 49 MB compression target
+
+
+def _yandex_dest(file_path: str, file_type: str) -> str:
+    """Return the Yandex.Disk destination path for a file."""
+    subdir = "Video" if file_type == "video" else "Audio"
+    dest_dir = os.path.join(YANDEX_DISK_PATH, subdir)
+    os.makedirs(dest_dir, exist_ok=True)
+    return os.path.join(dest_dir, os.path.basename(file_path))
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -22,14 +42,40 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "  - youtube.com/watch?v=...\n"
         "  - youtu.be/...\n"
         "  - youtube.com/shorts/...\n\n"
-        "Используй /help для справки."
+        "Используй /help для справки.\n"
+        "Используй /cancel чтобы отменить текущую операцию."
     )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "Отправь ссылку на YouTube — я предложу скачать видео или только аудио.\n\n"
-        "Если файл слишком большой для Telegram, он будет сохранён на Яндекс.Диск."
+        "Если файл > 50 MB — оригинал сохраняется на Яндекс.Диск, "
+        "потом предлагается сжать и отправить в Telegram.\n\n"
+        "/cancel — отменить операцию и удалить временные файлы."
+    )
+
+
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data["cancelled"] = True
+
+    # Remove every file in DOWNLOAD_DIR (all belong to this bot instance / user)
+    removed = 0
+    for path in glob.glob(os.path.join(DOWNLOAD_DIR, "*")):
+        try:
+            os.remove(path)
+            removed += 1
+        except Exception:
+            pass
+
+    context.user_data.pop("pending_file", None)
+    context.user_data.pop("compress_attempt", None)
+    context.user_data.pop("last_video_kbps", None)
+    context.user_data.pop("last_audio_kbps", None)
+    context.user_data.pop("file_type", None)
+
+    await update.message.reply_text(
+        "Все задачи отменены, временные файлы удалены."
     )
 
 
@@ -48,6 +94,8 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not url.startswith("http"):
         url = "https://" + url
 
+    # Reset cancellation flag on each new URL
+    context.user_data["cancelled"] = False
     context.user_data["url"] = url
 
     keyboard = InlineKeyboardMarkup([
@@ -123,7 +171,6 @@ async def resolution_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text("У вас нет доступа.")
         return
 
-    # callback_data = "res:{height}"
     parts = query.data.split(":", 1)
     if len(parts) < 2:
         await query.edit_message_text("Некорректные данные кнопки.")
@@ -159,10 +206,15 @@ async def resolution_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def _send_file(update: Update, context: ContextTypes.DEFAULT_TYPE, file_path: str) -> None:
-    """Send the file via Telegram if small enough, otherwise ask user what to do."""
+    """Send the file via Telegram if ≤ 50 MB.
+
+    If the file is larger:
+      1. Save original to Yandex.Disk immediately.
+      2. Ask user whether to compress and send to Telegram.
+    """
     size = os.path.getsize(file_path)
 
-    if size <= MAX_TELEGRAM_SIZE:
+    if size <= _SEND_LIMIT:
         try:
             with open(file_path, "rb") as f:
                 await update.effective_chat.send_document(
@@ -175,24 +227,41 @@ async def _send_file(update: Update, context: ContextTypes.DEFAULT_TYPE, file_pa
             context.user_data.pop("pending_file", None)
         return
 
-    # File too large — ask user
+    # File is too large — save to Yandex.Disk first
     size_mb = size / (1024 * 1024)
+    file_type = context.user_data.get("file_type", "video")
+    dest_path = _yandex_dest(file_path, file_type)
+
+    try:
+        shutil.copy2(file_path, dest_path)
+        logger.info("Saved original to Yandex.Disk: %s", dest_path)
+    except Exception as e:
+        logger.error("Failed to copy to Yandex.Disk: %s", e)
+        await update.effective_chat.send_message(
+            f"Файл {size_mb:.1f} MB — не удалось сохранить на Яндекс.Диск: {e}"
+        )
+        return
+
+    # Reset compression state for this file
+    context.user_data["compress_attempt"] = 1
+    context.user_data.pop("last_video_kbps", None)
+    context.user_data.pop("last_audio_kbps", None)
 
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Сжать и отправить", callback_data="toobig:compress"),
-            InlineKeyboardButton("Сохранить в Яндекс.Диск", callback_data="toobig:yandex"),
+            InlineKeyboardButton("Да, сжать", callback_data="compress:yes"),
+            InlineKeyboardButton("Нет, не надо", callback_data="compress:no"),
         ]
     ])
     await update.effective_chat.send_message(
-        f"Файл {size_mb:.1f} MB — слишком большой для Telegram (лимит {MAX_TELEGRAM_SIZE // 1024 // 1024} MB).\n"
-        "Что сделать?",
+        f"Файл {size_mb:.1f} MB. Оригинал сохранён в Яндекс.Диск.\n"
+        "Сжать до 49 MB и отправить в Telegram?",
         reply_markup=keyboard,
     )
 
 
-async def toobig_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle user choice for oversized files."""
+async def compress_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the iterative compression loop."""
     query = update.callback_query
     await query.answer()
 
@@ -201,55 +270,106 @@ async def toobig_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.edit_message_text("У вас нет доступа.")
         return
 
+    choice = query.data  # "compress:yes" or "compress:no"
+
+    if choice == "compress:no":
+        file_path = context.user_data.pop("pending_file", None)
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+        await query.edit_message_text("Оригинал сохранён в Яндекс.Диск.")
+        return
+
+    # compress:yes
+    if context.user_data.get("cancelled"):
+        await query.edit_message_text("Операция отменена.")
+        return
+
     file_path = context.user_data.get("pending_file")
     if not file_path or not os.path.exists(file_path):
         await query.edit_message_text("Файл не найден. Попробуй скачать заново.")
         return
 
-    choice = query.data  # "toobig:compress" or "toobig:yandex"
+    attempt = context.user_data.get("compress_attempt", 1)
+    file_type = context.user_data.get("file_type", "video")
+    is_audio = file_type == "audio"
 
-    if choice == "toobig:yandex":
-        file_type = context.user_data.get("file_type", "video")
-        subdir = "Video" if file_type == "video" else "Audio"
-        dest_dir = os.path.join(YANDEX_DISK_PATH, subdir)
-        os.makedirs(dest_dir, exist_ok=True)
-        dest_path = os.path.join(dest_dir, os.path.basename(file_path))
-        shutil.copy2(file_path, dest_path)
-        os.remove(file_path)
-        context.user_data.pop("pending_file", None)
-        await query.edit_message_text(f"Сохранён в Яндекс.Диск:\n{dest_path}")
+    await query.edit_message_text(f"Сжимаю (попытка {attempt})...")
+
+    # Determine bitrates
+    try:
+        duration = await _get_duration(file_path)
+    except Exception as e:
+        await query.edit_message_text(f"Не удалось определить длительность: {e}")
         return
 
-    # toobig:compress
-    await query.edit_message_text("Сжимаю...")
+    prev_video_kbps = context.user_data.get("last_video_kbps", 0)
+    prev_audio_kbps = context.user_data.get("last_audio_kbps", 128)
+
+    video_kbps, audio_kbps = calculate_bitrate(
+        duration=duration,
+        target_bytes=_TARGET_BYTES,
+        is_audio=is_audio,
+        attempt=attempt,
+        prev_video_kbps=prev_video_kbps,
+        prev_audio_kbps=prev_audio_kbps,
+    )
+
     compressed_path = None
     try:
-        compressed_path = await compress_to_fit(file_path)
-        with open(compressed_path, "rb") as f:
-            await update.effective_chat.send_document(
-                document=f,
-                filename=os.path.basename(file_path),
-            )
-        await query.edit_message_text("Сжато и отправлено.")
+        compressed_path, result_size = await compress_file(file_path, video_kbps, audio_kbps)
     except Exception as e:
-        logger.error("Compression/send failed: %s", e)
-        # Fallback to Yandex.Disk
-        file_type = context.user_data.get("file_type", "video")
-        subdir = "Video" if file_type == "video" else "Audio"
-        dest_dir = os.path.join(YANDEX_DISK_PATH, subdir)
-        os.makedirs(dest_dir, exist_ok=True)
-        dest_path = os.path.join(dest_dir, os.path.basename(file_path))
-        if os.path.exists(file_path):
-            shutil.copy2(file_path, dest_path)
-        await query.edit_message_text(
-            f"Не удалось сжать. Сохранён в Яндекс.Диск:\n{dest_path}"
-        )
-    finally:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        if compressed_path and compressed_path != file_path and os.path.exists(compressed_path):
+        logger.error("compress_file failed: %s", e)
+        await query.edit_message_text(f"Ошибка сжатия: {e}")
+        return
+
+    # Check cancellation after the slow ffmpeg step
+    if context.user_data.get("cancelled"):
+        if compressed_path and os.path.exists(compressed_path):
             os.remove(compressed_path)
-        context.user_data.pop("pending_file", None)
+        await query.edit_message_text("Операция отменена.")
+        return
+
+    result_mb = result_size / (1024 * 1024)
+
+    if result_size <= _TARGET_BYTES:
+        # Success — send to Telegram
+        try:
+            with open(compressed_path, "rb") as f:
+                await update.effective_chat.send_document(
+                    document=f,
+                    filename=os.path.basename(file_path),
+                )
+            await query.edit_message_text("Сжато и отправлено в Telegram.")
+        except Exception as e:
+            logger.error("send compressed failed: %s", e)
+            await query.edit_message_text(f"Не удалось отправить: {e}")
+        finally:
+            if compressed_path and os.path.exists(compressed_path):
+                os.remove(compressed_path)
+            orig = context.user_data.pop("pending_file", None)
+            if orig and os.path.exists(orig):
+                os.remove(orig)
+        return
+
+    # Still too large — clean up this attempt's file and ask again
+    if compressed_path and os.path.exists(compressed_path):
+        os.remove(compressed_path)
+
+    # Save bitrates for next attempt
+    context.user_data["last_video_kbps"] = video_kbps
+    context.user_data["last_audio_kbps"] = audio_kbps
+    context.user_data["compress_attempt"] = attempt + 1
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Да, ещё сжать", callback_data="compress:yes"),
+            InlineKeyboardButton("Нет, хватит", callback_data="compress:no"),
+        ]
+    ])
+    await query.edit_message_text(
+        f"Сжатый файл {result_mb:.1f} MB — всё ещё большой. Попробовать агрессивнее?",
+        reply_markup=keyboard,
+    )
 
 
 async def audio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -267,7 +387,6 @@ async def audio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text("URL не найден. Отправь ссылку заново.")
         return
 
-    # callback_data = "audio:{bitrate}"
     bitrate = query.data.split(":")[1]
 
     await query.edit_message_text(f"Скачиваю аудио ({bitrate} kbps)...")

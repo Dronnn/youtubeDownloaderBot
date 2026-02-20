@@ -73,9 +73,10 @@ async def format_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if choice == "format:audio":
         keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("128 kbps", callback_data="audio:128"),
-                InlineKeyboardButton("192 kbps", callback_data="audio:192"),
-                InlineKeyboardButton("320 kbps", callback_data="audio:320"),
+                InlineKeyboardButton("96", callback_data="audio:96"),
+                InlineKeyboardButton("128", callback_data="audio:128"),
+                InlineKeyboardButton("192", callback_data="audio:192"),
+                InlineKeyboardButton("320", callback_data="audio:320"),
             ]
         ])
         await query.edit_message_text("Выбери качество аудио:", reply_markup=keyboard)

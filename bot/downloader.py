@@ -4,7 +4,7 @@ from functools import partial
 
 import yt_dlp
 
-from bot.config import DOWNLOAD_DIR
+from bot.config import DOWNLOAD_DIR, FFMPEG_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,7 @@ async def download_video(url: str, height: int) -> tuple[str, str]:
         "format": f"bestvideo[height<={height}]+bestaudio/best[height<={height}]",
         "outtmpl": DOWNLOAD_DIR + "/%(title)s.%(ext)s",
         "merge_output_format": "mp4",
+        "ffmpeg_location": FFMPEG_PATH,
         "quiet": True,
         "no_warnings": True,
     }
@@ -89,6 +90,7 @@ async def download_audio(url: str) -> tuple[str, str]:
                 "preferredquality": "192",
             }
         ],
+        "ffmpeg_location": FFMPEG_PATH,
         "quiet": True,
         "no_warnings": True,
     }

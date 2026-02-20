@@ -23,3 +23,5 @@ DOWNLOAD_DIR: str = os.getenv("DOWNLOAD_DIR", "/tmp/yt_downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 MAX_TELEGRAM_SIZE: int = int(os.getenv("MAX_TELEGRAM_SIZE", "52428800"))
+
+FFMPEG_PATH: str = os.getenv("FFMPEG_PATH", "/usr/local/bin/ffmpeg")

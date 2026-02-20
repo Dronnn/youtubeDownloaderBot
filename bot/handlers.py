@@ -5,7 +5,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bot.config import ALLOWED_USERS, YANDEX_DISK_PATH, MAX_TELEGRAM_SIZE
-from bot.downloader import get_video_info, download_video, download_audio
+from bot.downloader import get_video_info, download_video, download_audio, compress_to_fit
 
 logger = logging.getLogger(__name__)
 
@@ -149,28 +149,41 @@ async def resolution_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def _send_file(update: Update, file_path: str) -> None:
-    """Send the file via Telegram or copy to Yandex.Disk if too large."""
-    size = os.path.getsize(file_path)
-    size_mb = size / (1024 * 1024)
-
+    """Send the file via Telegram. Compress if too large, fallback to Yandex.Disk."""
+    compressed_path = None
     try:
-        if size <= MAX_TELEGRAM_SIZE:
-            with open(file_path, "rb") as f:
-                await update.effective_chat.send_document(
-                    document=f,
-                    filename=os.path.basename(file_path),
-                )
-        else:
-            os.makedirs(YANDEX_DISK_PATH, exist_ok=True)
-            dest_path = os.path.join(YANDEX_DISK_PATH, os.path.basename(file_path))
-            shutil.copy2(file_path, dest_path)
+        size = os.path.getsize(file_path)
+
+        if size > MAX_TELEGRAM_SIZE:
             await update.effective_chat.send_message(
-                f"Файл слишком большой ({size_mb:.1f} MB). "
-                f"Сохранён в Яндекс.Диск:\n{dest_path}"
+                f"Файл {size / 1024 / 1024:.1f} MB — сжимаю..."
+            )
+            try:
+                compressed_path = await compress_to_fit(file_path)
+            except Exception as e:
+                logger.warning("Compression failed: %s, falling back to Yandex.Disk", e)
+                os.makedirs(YANDEX_DISK_PATH, exist_ok=True)
+                dest_path = os.path.join(YANDEX_DISK_PATH, os.path.basename(file_path))
+                shutil.copy2(file_path, dest_path)
+                await update.effective_chat.send_message(
+                    f"Не удалось сжать. Сохранён в Яндекс.Диск:\n{dest_path}"
+                )
+                return
+
+            send_path = compressed_path
+        else:
+            send_path = file_path
+
+        with open(send_path, "rb") as f:
+            await update.effective_chat.send_document(
+                document=f,
+                filename=os.path.basename(file_path),
             )
     finally:
         if os.path.exists(file_path):
             os.remove(file_path)
+        if compressed_path and compressed_path != file_path and os.path.exists(compressed_path):
+            os.remove(compressed_path)
 
 
 async def _download_and_send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

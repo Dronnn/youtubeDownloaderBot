@@ -46,6 +46,22 @@ Target: old Mac via SSH (`ssh macbook-i7`), Python 3.12.12 at `/usr/local/bin/py
 
 ---
 
+## Large-file compression loop + /cancel command (2026-02-20)
+
+### Goal
+Rework oversized-file handling: always save original to Yandex.Disk first, then offer
+iterative compression with user confirmation after each attempt. Add /cancel command.
+
+### Steps
+- [x] Update `bot/downloader.py`: add `compress_file()` and `calculate_bitrate()`
+- [x] Update `bot/handlers.py`: rewrite `_send_file()`, replace `toobig_callback` with
+      `compress_callback`, add `cancel_command`
+- [x] Update `bot/main.py`: register new handlers, remove old `toobig_callback`
+- [x] git commit and push
+- [x] Deploy to macbook-i7, verify bot starts
+
+---
+
 ## Code Review & Bugfix (2026-02-20)
 
 - [x] VERSION MISMATCH: проверить совместимость кода с python-telegram-bot v22 — OK, совместим
@@ -57,3 +73,123 @@ Target: old Mac via SSH (`ssh macbook-i7`), Python 3.12.12 at `/usr/local/bin/py
 - [x] HANDLERS: исправить format_callback (обрабатывал результат get_video_info неправильно)
 - [x] CODE QUALITY: общая чистка, проверка error handling, cleanup временных файлов
 - [x] COMPATIBILITY: проверена совместимость с macOS Big Sur (Python 3.11, yt-dlp, python-telegram-bot v22)
+
+---
+
+## Always save to Yandex.Disk + tmp inside Yandex.Disk (2026-02-20)
+
+### Goal
+All downloaded files should always be saved to Yandex.Disk (Video/ or Audio/), not just
+files over 50 MB. Temporary download directory moves from /tmp/yt_downloads to
+{YANDEX_DISK_PATH}/tmp so downloads happen directly on the Yandex.Disk volume.
+
+### Steps
+- [x] Update `bot/config.py`: derive DOWNLOAD_DIR from YANDEX_DISK_PATH instead of env var
+- [x] Update `bot/handlers.py` `_send_file`: always copy to Yandex.Disk before sending
+- [x] Update `bot/handlers.py` `help_command`: reflect that all files go to Yandex.Disk
+- [x] Update `.env`: remove DOWNLOAD_DIR line
+- [x] Verify compress_callback and cancel_command still clean up tmp files correctly
+
+---
+
+## Revert "always save to Yandex.Disk" (2026-02-20)
+
+### Goal
+Revert the always-save-to-Yandex.Disk behavior. Original logic: files <= 50 MB go to
+Telegram only (no Yandex.Disk), files > 50 MB go to Yandex.Disk with compression prompt.
+
+### Steps
+- [x] Revert `bot/config.py`: DOWNLOAD_DIR back to env var with default `/tmp/yt_downloads`
+- [x] Revert `bot/handlers.py` `_send_file`: Yandex.Disk copy only for > 50 MB
+- [x] Revert `bot/handlers.py` `help_command`: original help text
+- [x] Revert `.env`: add back `DOWNLOAD_DIR=/tmp/yt_downloads`
+
+---
+
+## Progress reporting in Telegram chat (2026-02-20)
+
+### Goal
+Show download/conversion progress in Telegram messages (e.g. "Скачиваю... 34% (12.5 / 36.8 MB)"),
+updating every ~4 seconds. Uses yt-dlp progress_hooks and postprocessor hooks.
+
+### Steps
+- [x] Update `bot/downloader.py`: add `_make_hooks()`, wire `progress_callback` into `download_video` and `download_audio`
+- [x] Update `bot/handlers.py`: add `_make_tg_progress()`, pass progress callback from `resolution_callback` and `audio_callback`
+- [x] Verify no imports or existing functionality broken
+
+---
+
+## Bot management script on macbook-i7 (2026-02-20)
+
+### Goal
+Create `/Users/andrewmaier/manage-bots.sh` on macbook-i7 — a single script to start/stop/restart/status
+all 5 Telegram bots running on that machine. PID-file based, colorized output, safe stop via PID only.
+
+### Steps
+- [x] Write manage-bots.sh via SSH and chmod +x
+- [x] Test with `status` command (no stop/restart)
+
+---
+
+## Large-file handling improvements (2026-02-20)
+
+### Goal
+Support Local Telegram Bot API Server for 2 GB file uploads while keeping compression as fallback.
+Add "Оригинал" (original) audio option for fastest downloads without conversion.
+
+### Steps
+- [x] Add Local Bot API Server support — implement `use_local_api` config flag
+- [x] Add "Оригинал" audio option — download raw audio without ffmpeg conversion (fastest)
+- [x] Compression as fallback — keep iterative compression for files > 2 GB only
+- [x] Update help text to document new options
+- [x] git commit: "Add Local Bot API Server support for 2 GB file uploads"
+- [x] git commit: "Add original audio format option and improve progress messages"
+
+---
+
+## Progress messages improvements (2026-02-20)
+
+### Goal
+Enhance progress reporting throughout download-send pipeline with separate progress bars for
+video/audio tracks, post-processing steps, and file upload.
+
+### Steps
+- [x] Video/audio download progress — show percentage, speed, and MB downloaded
+- [x] Separate progress lines for video track and audio track downloads (when merging)
+- [x] Post-processing progress — merging and conversion to MP3 (if applicable)
+- [x] Upload progress — "Отправляю в Telegram (X MB)..." status message
+- [x] Telegram message updates — dedup identical text, catch BadRequest silently
+- [x] git commit: "Improve progress messages throughout download-send pipeline"
+
+---
+
+## Documentation and deployment (2026-02-20)
+
+### Goal
+Document deployment process and best practices for managing bot instances.
+
+### Steps
+- [x] Create `DEPLOY.md` — deployment guide for local Telegram Bot API Server
+- [x] Document manage-bots.sh usage and PID-file management
+- [x] Add version constraints and compatibility notes
+
+---
+
+## Testing and validation (2026-02-20)
+
+- [ ] End-to-end test: download video at multiple resolutions, verify quality
+- [ ] End-to-end test: download audio at 96/128/192/320 kbps, verify quality
+- [ ] End-to-end test: "Оригинал" audio option (raw download without ffmpeg)
+- [ ] Test file > 2 GB with Local Bot API Server
+- [ ] Test file > 2 GB fallback compression (if Server unavailable)
+- [ ] Verify progress messages update smoothly (no spam, dedup working)
+- [ ] Verify /cancel command stops download gracefully
+- [ ] Verify Yandex.Disk upload on compression failure
+
+---
+
+## Remaining / Future
+
+- [ ] Auto-start via launchd (LaunchAgent plist) — not critical for MVP
+- [ ] Rate limiting and cooldown for repeated requests
+- [ ] Logging to file for debugging on production machine

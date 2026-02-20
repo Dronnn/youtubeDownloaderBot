@@ -71,7 +71,14 @@ async def format_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     choice = query.data  # "format:video" or "format:audio"
 
     if choice == "format:audio":
-        await _download_and_send_audio(update, context)
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("128 kbps", callback_data="audio:128"),
+                InlineKeyboardButton("192 kbps", callback_data="audio:192"),
+                InlineKeyboardButton("320 kbps", callback_data="audio:320"),
+            ]
+        ])
+        await query.edit_message_text("Выбери качество аудио:", reply_markup=keyboard)
         return
 
     # format:video — fetch available resolutions
@@ -133,6 +140,7 @@ async def resolution_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     await query.edit_message_text("Скачиваю видео...")
+    context.user_data["file_type"] = "video"
 
     try:
         file_path, title = await download_video(url, height)
@@ -200,8 +208,11 @@ async def toobig_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     choice = query.data  # "toobig:compress" or "toobig:yandex"
 
     if choice == "toobig:yandex":
-        os.makedirs(YANDEX_DISK_PATH, exist_ok=True)
-        dest_path = os.path.join(YANDEX_DISK_PATH, os.path.basename(file_path))
+        file_type = context.user_data.get("file_type", "video")
+        subdir = "Video" if file_type == "video" else "Audio"
+        dest_dir = os.path.join(YANDEX_DISK_PATH, subdir)
+        os.makedirs(dest_dir, exist_ok=True)
+        dest_path = os.path.join(dest_dir, os.path.basename(file_path))
         shutil.copy2(file_path, dest_path)
         os.remove(file_path)
         context.user_data.pop("pending_file", None)
@@ -222,8 +233,11 @@ async def toobig_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except Exception as e:
         logger.error("Compression/send failed: %s", e)
         # Fallback to Yandex.Disk
-        os.makedirs(YANDEX_DISK_PATH, exist_ok=True)
-        dest_path = os.path.join(YANDEX_DISK_PATH, os.path.basename(file_path))
+        file_type = context.user_data.get("file_type", "video")
+        subdir = "Video" if file_type == "video" else "Audio"
+        dest_dir = os.path.join(YANDEX_DISK_PATH, subdir)
+        os.makedirs(dest_dir, exist_ok=True)
+        dest_path = os.path.join(dest_dir, os.path.basename(file_path))
         if os.path.exists(file_path):
             shutil.copy2(file_path, dest_path)
         await query.edit_message_text(
@@ -237,18 +251,29 @@ async def toobig_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         context.user_data.pop("pending_file", None)
 
 
-async def _download_and_send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def audio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle audio bitrate selection."""
     query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    if ALLOWED_USERS and user_id not in ALLOWED_USERS:
+        await query.edit_message_text("У вас нет доступа.")
+        return
 
     url = context.user_data.get("url")
     if not url:
         await query.edit_message_text("URL не найден. Отправь ссылку заново.")
         return
 
-    await query.edit_message_text("Скачиваю аудио...")
+    # callback_data = "audio:{bitrate}"
+    bitrate = query.data.split(":")[1]
+
+    await query.edit_message_text(f"Скачиваю аудио ({bitrate} kbps)...")
+    context.user_data["file_type"] = "audio"
 
     try:
-        file_path, title = await download_audio(url)
+        file_path, title = await download_audio(url, bitrate)
     except Exception as e:
         logger.error("download_audio failed for %s: %s", url, e)
         await query.edit_message_text(f"Не удалось скачать: {e}")

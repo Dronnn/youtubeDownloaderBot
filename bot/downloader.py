@@ -80,7 +80,7 @@ async def download_video(url: str, height: int) -> tuple[str, str]:
     return file_path, title
 
 
-async def download_audio(url: str) -> tuple[str, str]:
+async def download_audio(url: str, bitrate: str = "192") -> tuple[str, str]:
     """Download audio as MP3. Returns (file_path, title)."""
     opts = {
         "format": "bestaudio/best",
@@ -89,7 +89,7 @@ async def download_audio(url: str) -> tuple[str, str]:
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
-                "preferredquality": "192",
+                "preferredquality": bitrate,
             }
         ],
         "ffmpeg_location": FFMPEG_PATH,
